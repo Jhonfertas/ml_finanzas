@@ -1,0 +1,908 @@
+---
+title: 'Solución Taller 1: Preprocesamiento y visualización de datos
+UNIVERSIDAD DEL VALLE – FACULTAD DE INGENIERIA 
+Métodos Cuantitativos para el Análisis de la Información'     
+subtitle: "Profesor: Ivan Mauricio Bermúdez Vera"
+author: "Estuadiantes: Juan Chacón - Jhon Tascón - Valeria Saldaña"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include=FALSE}
+# Listado de librerias requeridas por el script
+
+# Libreria especial para hacer carga automática de librerias
+if (!require("pacman")) install.packages("pacman")
+
+# Verificación, instalación y carga de librerias.
+pacman::p_load(lubridate, 
+               dplyr, 
+               visdat, 
+               missMDA, 
+               mice, 
+               validate,
+               errorlocate,
+               corrplot, 
+               ggplot2,
+               patchwork,
+               here, 
+               VIM,
+               dbscan,
+               rmarkdown,
+               knitr,
+               tinytex,
+               ggplot2,
+               scales,
+               naniar,
+               purrr)
+
+
+```
+
+
+El conjunto de datos German Credit presenta información sobre 1000 solicitantes de crédito. Cada variable en el conjunto permite una aproximación a las características financieras y socioeconómicas del potencial cliente a su vez que permite construir un análisis de estas variables con respecto a su comportamiento crediticio.
+
+
+```{r}
+german <- read.table("C:/Users/salda/Downloads/german.data", header = FALSE, sep = "")
+
+```
+
+## 1. Diagnóstico de calidad de datos 
+
+```{r}
+#Se actualizan los nombres de las variables
+names(german) <- c("checking_status", "duration", 
+"credit_history", "purpose","credit_amount", 
+"savings", "employment", "installment_rate",
+"personal_status_sex", "other_debtors", 
+"residence_since", "property", "age", 
+"other_installment_plans", "housing", 
+"existing_credits", "job", "people_liable", 
+"telephone", "foreign_worker", "default"
+)
+
+```
+
+Se inicia verificando la estructura general de los datos, en los que se presentan 1000 observaciones y 20 variables. A continuación se presentan los tipos de variables donde se identifican 13 variables tipo caracter y 7 variables numéricas:
+
+```{r}
+str(german)
+
+```
+Se  procede a convertir las variables categóricas a sus respectivas equivalencias denotadas en los atributos compartidos, a su vez que se convierte a formato factor:
+
+```{r, include=FALSE}
+library(dplyr)
+
+# Diccionario de recodificación
+dict_mapping <- list(
+
+  checking_status = c(
+    A11 = "less_0",
+    A12 = "0_200",
+    A13 = "greater_200",
+    A14 = "no_account"
+  ),
+
+  credit_history = c(
+    A30 = "no_credit_all_paid",
+    A31 = "all_paid",
+    A32 = "existing_paid",
+    A33 = "delay",
+    A34 = "critical_other"
+  ),
+
+  purpose = c(
+    A40 = "car_new",
+    A41 = "car_used",
+    A42 = "furniture_equipment",
+    A43 = "radio_tv",
+    A44 = "domestic_appliances",
+    A45 = "repairs",
+    A46 = "education",
+    A47 = "vacation",
+    A48 = "retraining",
+    A49 = "business",
+    A410 = "others"
+  ),
+
+  savings = c(
+    A61 = "less_100",
+    A62 = "100_500",
+    A63 = "500_1000",
+    A64 = "greater_1000",
+    A65 = "unknown"
+  ),
+
+  employment = c(
+    A71 = "unemployed",
+    A72 = "less_1",
+    A73 = "1_4",
+    A74 = "4_7",
+    A75 = "greater_7"
+  ),
+
+  personal_status_sex = c(
+    A91 = "male_divorced_separated",
+    A92 = "female_divorced_separated_married",
+    A93 = "male_single",
+    A94 = "male_married",
+    A95 = "female_single"
+  ),
+
+  other_debtors = c(
+    A101 = "none",
+    A102 = "co_applicant",
+    A103 = "guarantor"
+  ),
+
+  property = c(
+    A121 = "real_estate",
+    A122 = "building_society_savings_life_insurance",
+    A123 = "car_or_other",
+    A124 = "unknown_no_property"
+  ),
+
+  other_installment_plans = c(
+    A141 = "bank",
+    A142 = "stores",
+    A143 = "none"
+  ),
+
+  housing = c(
+    A151 = "rent",
+    A152 = "own",
+    A153 = "for_free"
+  ),
+
+  job = c(
+    A171 = "unemployed_unskilled",
+    A172 = "unskilled_resident",
+    A173 = "skilled_official",
+    A174 = "management_self_employed_highly_qualified"
+  ),
+
+  telephone = c(
+    A191 = "none",
+    A192 = "yes"
+  ),
+
+  foreign_worker = c(
+    A201 = "yes",
+    A202 = "no"
+  ),
+
+  default = c(
+    "1" = "good",
+    "2" = "bad"
+  )
+)
+
+# Aplicar recodificación
+for (var in names(dict_mapping)) {
+
+  german[[var]] <- factor(
+    recode(
+      as.character(german[[var]]),
+      !!!dict_mapping[[var]]
+    )
+  )
+
+}
+```
+
+
+```{r, echo=FALSE}
+glimpse(german)
+```
+Ahora, una vez realizada la recodificación, se procede a verificar si los datos numéricos y categóricos cumplen con sus características de validación que se describen a continuación:
+
+```{r, include=FALSE}
+# Reglas de validación
+Rules <- validator(
+
+  # numerical rules
+  german$duration > 0,
+  german$credit_amount > 0,
+  german$installment_rate > 0,
+  german$residence_since > 0,
+  german$age > 0,
+  german$existing_credits >= 0,
+  german$people_liable >= 0,
+  
+  #reglas para variables categóricas
+  
+  checking_status %in% unname(dict_mapping$checking_status),
+
+  credit_history %in% unname(dict_mapping$credit_history),
+
+  purpose %in% unname(dict_mapping$purpose),
+
+  savings %in% unname(dict_mapping$savings),
+
+  employment %in% unname(dict_mapping$employment),
+
+  personal_status_sex %in% unname(dict_mapping$personal_status_sex),
+
+  other_debtors %in% unname(dict_mapping$other_debtors),
+
+  property %in% unname(dict_mapping$property),
+
+  other_installment_plans %in% unname(dict_mapping$other_installment_plans),
+
+  housing %in% unname(dict_mapping$housing),
+
+  job %in% unname(dict_mapping$job),
+
+  telephone %in% unname(dict_mapping$telephone),
+
+  foreign_worker %in% unname(dict_mapping$foreign_worker),
+
+  default %in% unname(dict_mapping$default)
+  
+  )
+```
+
+
+```{r, echo=FALSE}
+Rules # Mostrar reglas
+```
+
+
+```{r, include=FALSE}
+results <- confront(german, Rules)
+summary(results)
+```
+
+Se definen cuántas filas presentan al menos una regla incumplida y se encuentra que el número es cero. 
+
+```{r, echo=FALSE}
+# Identificar registros con al menos una regla incumplida
+cumplimiento <- values(results)
+filas_con_error <- which(apply(cumplimiento, 1, function(x) any(x == FALSE, na.rm = TRUE)))
+filas_con_error
+```
+A su vez, se encuentra que el número de datos faltantes en toda la base es igualmente cero.
+```{r}
+sum(is.na(german))
+```
+
+
+```{r, echo=FALSE}
+# Diagnóstico inicial de faltantes
+
+naniar::vis_miss(german) + 
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1)
+  )
+```
+En cuanto a datos atípicos, se encuentran lo
+
+```{r, include=FALSE}
+datos_num <- german %>% dplyr::select(where(is.numeric))
+```
+
+Criterio Tukey
+
+```{r, include=FALSE}
+out_tukey <- boxplot.stats(german$duration)$out
+out_tukey
+
+id_tukey <- which(german$duration %in% out_tukey)
+id_tukey
+```
+
+
+```{r, include=FALSE}
+id_out_uni <- function(x, method = c("zscore", "tukey"), z_cut = 3) {
+  method <- match.arg(method)
+  
+  if (!is.numeric(x)) stop("La variable debe ser numérica.")
+  
+  if (method == "zscore") {
+    id_out <- which(abs(scale(x)) > z_cut)
+  } else if (method == "tukey") {
+    id_out <- which(x %in% boxplot.stats(x)$out)
+  }
+  
+  return(id_out)
+}
+
+# Prueba de la función
+id_out_uni(german$credit_amount, method = "zscore")
+id_out_uni(german$credit_amount, method = "tukey")
+```
+
+
+```{r, echo=FALSE}
+
+
+vars_num <- c(
+  "duration",
+  "credit_amount",
+  "installment_rate",
+  "residence_since",
+  "age",
+  "existing_credits",
+  "people_liable"
+)
+
+
+tukey_summary <- map_dfr(vars_num, function(v){
+
+  x <- german[[v]]
+
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- IQR(x, na.rm = TRUE)
+
+  li <- q1 - 1.5 * iqr
+  ls <- q3 + 1.5 * iqr
+
+  n_out <- sum(x < li | x > ls, na.rm = TRUE)
+
+  tibble(
+    Variable = v,
+    Q1 = q1,
+    Q3 = q3,
+    IQR = iqr,
+    Limite_Inferior = li,
+    Limite_Superior = ls,
+    Atipicos = n_out,
+    Porcentaje = round(100 * n_out / length(x), 2)
+  )
+})
+
+kable(
+  tukey_summary,
+  digits = 2,
+  caption = "Detección de valores atípicos mediante el criterio de Tukey"
+)
+
+```
+
+
+```{r}
+library(tidyr)
+library(ggplot2)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_num),
+    names_to = "Variable",
+    values_to = "Valor"
+  )
+
+ggplot(datos_long,
+       aes(x = Variable,
+           y = Valor)) +
+  geom_boxplot(fill = "skyblue") +
+  facet_wrap(
+    ~ Variable,
+    scales = "free_y",
+    ncol = 3
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Detección de valores atípicos según el criterio de Tukey",
+    x = "",
+    y = ""
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+```
+
+```{r}
+
+
+vars_num <- c(
+  "duration",
+  "credit_amount",
+  "installment_rate",
+  "residence_since",
+  "age",
+  "existing_credits",
+  "people_liable"
+)
+
+outliers_filas <- map_dfr(vars_num, function(v){
+
+  x <- german[[v]]
+
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- IQR(x, na.rm = TRUE)
+
+  li <- q1 - 1.5 * iqr
+  ls <- q3 + 1.5 * iqr
+
+  idx <- which(x < li | x > ls)
+
+  tibble(
+    Variable = v,
+    Fila = idx,
+    Valor = x[idx]
+  )
+})
+
+outliers_filas
+```
+
+
+
+## 2. Análisis exploratorio ##
+
+
+
+### Distribución de la variable objetivo (default) 
+
+
+```{r, echo=FALSE}
+ggplot(german, aes(x = default)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribución de la variable objetivo (default)",
+       x = "Default",
+       y = "Frecuencia") +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+### Análisis descriptivo de variables cuantitativas
+
+Se presenta inicialmente los estadísticos descriptivos de las variables numéricas:
+```{r, include=FALSE}
+
+vars_num <- c(
+  "duration",
+  "credit_amount",
+  "installment_rate",
+  "residence_since",
+  "age",
+  "existing_credits",
+  "people_liable"
+)
+
+estadisticos <- data.frame(
+  Media = sapply(german[vars_num], mean),
+  Mediana = sapply(german[vars_num], median),
+  Desv_Est = sapply(german[vars_num], sd),
+  Minimo = sapply(german[vars_num], min),
+  Maximo = sapply(german[vars_num], max)
+)
+
+estadisticos
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  estadisticos,
+  digits = 2,
+  caption = "Estadísticos descriptivos de las variables numéricas"
+)
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(tidyverse)
+
+vars_num <- c(
+  "duration",
+  "credit_amount",
+  "installment_rate",
+  "residence_since",
+  "age",
+  "existing_credits",
+  "people_liable"
+)
+
+etiquetas <- c(
+  duration = "Duración (meses)",
+  credit_amount = "Monto del crédito (valor)",
+  installment_rate = "Tasa de cuota (%)",
+  residence_since = "Residencia actual (meses)",
+  age = "Edad (años)",
+  existing_credits = "Número de créditos existentes",
+  people_liable = "Personas responsables"
+)
+
+datos_long <- german %>%
+  select(all_of(vars_num)) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "valor"
+  )
+
+ggplot(datos_long, aes(x = "", y = valor)) +
+  geom_violin(fill = "skyblue", alpha = 0.7) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y",
+    labeller = labeller(variable = etiquetas)
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de variables numéricas",
+    x = "",
+    y = NULL
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+
+
+### Análisis descriptivo de variables categóricas 
+
+```{r, echo=FALSE}
+library(tidyverse)
+
+vars_cat <- c(
+  "checking_status",
+  "credit_history",
+  "purpose",
+  "savings",
+  "employment",
+  "personal_status_sex",
+  "other_debtors",
+  "property",
+  "other_installment_plans",
+  "housing",
+  "job",
+  "telephone",
+  "foreign_worker",
+  "default"
+)
+
+tabla_cat <- map_dfr(vars_cat, function(v){
+
+  moda <- names(sort(table(german[[v]]),
+                     decreasing = TRUE))[1]
+
+  data.frame(
+    Variable = v,
+    Categorias = nlevels(german[[v]]),
+    Moda = moda,
+    Frecuencia_moda = max(table(german[[v]]))
+  )
+})
+
+kable(
+  tabla_cat,
+  caption = "Resumen descriptivo de variables categóricas"
+)
+```
+
+
+```{r, echo=FALSE}
+frecuencias_cat <- german %>%
+  select(all_of(vars_cat)) %>%
+  pivot_longer(
+    everything(),
+    names_to = "Variable",
+    values_to = "Categoria"
+  ) %>%
+  count(Variable, Categoria) %>%
+  group_by(Variable) %>%
+  mutate(
+    Porcentaje = round(100 * n / sum(n), 2)
+  )
+
+kable(
+  frecuencias_cat,
+  caption = "Frecuencias de variables categóricas"
+)
+```
+
+
+A continuación se presentan las gráficas de barras para las variables categóricas asociadas a aspectos financieros del crédito:
+
+```{r, echo=FALSE}
+library(tidyverse)
+
+vars_cat <- c(
+  "checking_status",
+  "credit_history",
+  "purpose",
+  "savings",
+  "other_debtors",
+  "other_installment_plans"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_cat),
+    names_to = "variable",
+    values_to = "categoria"
+  )
+
+ggplot(datos_long, aes(x = categoria)) +
+  geom_bar(fill = "steelblue") +
+  facet_wrap(~ variable, scales = "free_x", ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de variables categóricas",
+    x = "",
+    y = "Frecuencia"
+  ) +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 8
+    ),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+Igualmente, se grafican las variables socioeconómicas de los solicitantes, lo cual también contribuye a la construcción de un perfil de riesgo:
+
+```{r, echo=FALSE}
+
+library(tidyverse)
+
+vars_cat <- c(
+  "personal_status_sex",
+  "property",
+  "housing"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_cat),
+    names_to = "variable",
+    values_to = "categoria"
+  )
+
+ggplot(datos_long, aes(x = categoria)) +
+  geom_bar(fill = "steelblue") +
+  facet_wrap(~ variable, scales = "free_x", ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de variables categóricas",
+    x = "",
+    y = "Frecuencia"
+  ) +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+Finalmente se establecen las características asociadas al entorno laboral como una característica relevante del individuo ya que permitiría ser un medio de solvencia para respaldar al crédito:
+```{r, echo=FALSE}
+
+library(tidyverse)
+
+vars_cat <- c(
+  "employment",
+  "job",
+  "telephone",
+  "foreign_worker"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_cat),
+    names_to = "variable",
+    values_to = "categoria"
+  )
+
+ggplot(datos_long, aes(x = categoria)) +
+  geom_bar(fill = "steelblue") +
+  facet_wrap(~ variable,
+             scales = "free_x",
+             ncol = 2) +
+  theme_minimal() +
+  labs(
+    title = "Características laborales y demográficas",
+    x = "",
+    y = "Frecuencia"
+  ) +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 8
+    ),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+
+```{r, echo=FALSE}
+vars_financieras <- c(
+  "checking_status",
+  "credit_history",
+  "purpose",
+  "savings",
+  "other_debtors",
+  "other_installment_plans"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_financieras),
+    names_to = "variable",
+    values_to = "categoria"
+  )
+
+ggplot(datos_long,
+       aes(x = categoria,
+           fill = default)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~ variable,
+             scales = "free_x",
+             ncol = 3) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Variables financieras y default",
+    x = "",
+    y = "Porcentaje"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 8
+    )
+  )
+```
+
+
+```{r, echo=FALSE}
+
+
+vars_cat <- c(
+  "personal_status_sex",
+  "property",
+  "housing"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_cat),
+    names_to = "variable",
+    values_to = "categoria"
+  )
+
+ggplot(
+  datos_long,
+  aes(x = categoria, fill = default)
+) +
+  geom_bar(position = "fill") +
+  facet_wrap(
+    ~ variable,
+    scales = "free_x",
+    ncol = 3
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Distribución de default según variables sociodemográficas",
+    x = "",
+    y = "Porcentaje"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 8
+    ),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+
+```{r, echo=FALSE}
+
+vars_cat <- c(
+  "employment",
+  "job",
+  "telephone",
+  "foreign_worker"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_cat),
+    names_to = "variable",
+    values_to = "categoria"
+  )
+
+ggplot(
+  datos_long,
+  aes(x = categoria, fill = default)
+) +
+  geom_bar(position = "fill") +
+  facet_wrap(
+    ~ variable,
+    scales = "free_x",
+    ncol = 2
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Distribución de default según características laborales",
+    x = "",
+    y = "Porcentaje"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 8
+    ),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+
+
+```{r, echo=FALSE}
+
+
+vars_num <- c(
+  "duration",
+  "credit_amount",
+  "installment_rate",
+  "residence_since",
+  "age",
+  "existing_credits",
+  "people_liable"
+)
+
+datos_long <- german %>%
+  pivot_longer(
+    cols = all_of(vars_num),
+    names_to = "variable",
+    values_to = "valor"
+  )
+
+ggplot(
+  datos_long,
+  aes(
+    x = default,
+    y = valor,
+    fill = default
+  )
+) +
+  geom_violin(alpha = 0.5) +
+  geom_boxplot(
+    width = 0.15,
+    outlier.shape = NA
+  ) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y",
+    ncol = 3
+  ) +
+  theme_minimal() 
+
+```
+
+
+
+
